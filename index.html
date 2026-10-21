@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Ночная смена — Эпизод 1: Последний клиент. WebXR инди-хоррор для Meta Quest и ПК.">
+  <title>Ночная смена — Эпизод 1: Последний клиент</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9B%BD%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./css/style.css">
+
+  <!--
+    Three.js подключается локально (vendored) из ./libs/three/.
+    - "three"          -> ./libs/three/three.module.js
+    - "three/addons/"  -> ./libs/three/addons/  (содержимое examples/jsm)
+    Версия Three.js зафиксирована: r160 (npm: three@0.160.0).
+    Importmap обязан стоять ДО любого <script type="module">.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./libs/three/three.module.js",
+      "three/addons/": "./libs/three/addons/"
+    }
+  }
+  </script>
+
+  <link rel="modulepreload" href="./libs/three/three.module.js">
+  <link rel="modulepreload" href="./src/config.js">
+</head>
+<body>
+
+  <!-- ============================================================
+       Игровой холст (WebGLRenderer получает этот canvas из main.js)
+       ============================================================ -->
+  <canvas id="game-canvas" tabindex="-1"></canvas>
+
+  <!-- ============================================================
+       HUD для ПК-режима (в VR вместо него используются 3D-панели)
+       ============================================================ -->
+  <div id="hud" class="hidden" aria-live="polite">
+    <div id="hud-crosshair"></div>
+    <div id="hud-prompt" class="hidden"></div>
+    <div id="hud-clock">23:00</div>
+    <div id="subtitles" class="hidden"></div>
+  </div>
+
+  <!-- Виньетка комфорта для ПК и затемнение при смерти/переходах -->
+  <div id="desktop-vignette" aria-hidden="true"></div>
+  <div id="fade-overlay" aria-hidden="true"></div>
+
+  <!-- ============================================================
+       Экран загрузки
+       ============================================================ -->
+  <section id="loading-screen" class="screen" aria-label="Загрузка">
+    <div class="screen-inner">
+      <h1 class="game-title">НОЧНАЯ СМЕНА</h1>
+      <p class="game-subtitle">Эпизод 1 · Последний клиент</p>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="loading-bar" class="progress-bar"></div>
+      </div>
+      <p id="loading-text" class="muted">Загрузка…</p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Главное меню
+       ============================================================ -->
+  <section id="main-menu" class="screen hidden" aria-label="Главное меню">
+    <div class="screen-inner">
+      <h1 class="game-title flicker">НОЧНАЯ СМЕНА</h1>
+      <p class="game-subtitle">Эпизод 1 · Последний клиент</p>
+
+      <div class="menu-buttons">
+        <button id="btn-start-desktop" class="btn btn-primary" type="button">Играть на ПК</button>
+        <div id="vr-button-slot" class="vr-slot"></div>
+        <button id="btn-open-settings" class="btn" type="button">Настройки и комфорт</button>
+        <button id="btn-controls" class="btn" type="button" aria-expanded="false" aria-controls="controls-help">Управление</button>
+      </div>
+
+      <p id="xr-status" class="muted" role="status">Проверка поддержки WebXR…</p>
+
+      <div id="controls-help" class="panel hidden">
+        <h2>Управление</h2>
+        <table class="controls-table">
+          <thead>
+            <tr><th>Действие</th><th>VR (Quest Touch)</th><th>ПК</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Ходьба</td><td>Левый стик</td><td>W / A / S / D</td></tr>
+            <tr><td>Поворот</td><td>Правый стик</td><td>Мышь</td></tr>
+            <tr><td>Приседание</td><td>Физически присесть</td><td>C / Ctrl</td></tr>
+            <tr><td>Хват</td><td>Grip (боковая кнопка)</td><td>ЛКМ / E</td></tr>
+            <tr><td>Использовать</td><td>Trigger</td><td>F</td></tr>
+            <tr><td>Фонарик</td><td>A / X</td><td>Q</td></tr>
+            <tr><td>Инвентарь</td><td>Рука к поясу + Grip</td><td>Tab</td></tr>
+            <tr><td>Бросок</td><td>Отпустить Grip в движении</td><td>ПКМ</td></tr>
+            <tr><td>Меню / пауза</td><td>Кнопка меню (левый)</td><td>Esc</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="muted version-line">Версия <span id="menu-version">0.1.0</span></p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Настройки (форма строится из config.js → SETTINGS_SCHEMA)
+       ============================================================ -->
+  <section id="settings-panel" class="screen hidden" aria-label="Настройки">
+    <div class="screen-inner screen-inner-wide">
+      <h2 class="panel-title">Настройки и комфорт</h2>
+      <form id="settings-form" autocomplete="off"></form>
+      <div class="menu-row">
+        <button id="btn-settings-reset" class="btn" type="button">Сбросить</button>
+        <button id="btn-settings-close" class="btn btn-primary" type="button">Готово</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Пауза (ПК)
+       ============================================================ -->
+  <section id="pause-menu" class="screen hidden" aria-label="Пауза">
+    <div class="screen-inner">
+      <h2 class="panel-title">Пауза</h2>
+      <div class="menu-buttons">
+        <button id="btn-resume" class="btn btn-primary" type="button">Продолжить</button>
+        <button id="btn-pause-settings" class="btn" type="button">Настройки</button>
+        <button id="btn-restart-checkpoint" class="btn" type="button">С последнего чекпоинта</button>
+        <button id="btn-quit-menu" class="btn" type="button">В главное меню</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       Сообщение о фатальной ошибке
+       ============================================================ -->
+  <section id="error-panel" class="screen hidden" role="alert" aria-label="Ошибка">
+    <div class="screen-inner">
+      <h2 class="panel-title error-title">Не удалось запустить игру</h2>
+      <p id="error-message" class="error-message"></p>
+      <div class="menu-row">
+        <button id="btn-error-reload" class="btn btn-primary" type="button">Перезагрузить страницу</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Отладочный оверлей (включается через ?debug=1 или в настройках) -->
+  <pre id="debug-overlay" class="hidden" aria-hidden="true"></pre>
+
+  <noscript>
+    <section class="screen" style="display:flex">
+      <div class="screen-inner">
+        <h2 class="panel-title error-title">Нужен JavaScript</h2>
+        <p>Для игры требуется включённый JavaScript и браузер с поддержкой WebGL.</p>
+      </div>
+    </section>
+  </noscript>
+
+  <!-- ============================================================
+       Страж загрузки: ловит ошибки скриптов и показывает их игроку.
+       Классический (не модульный) скрипт, чтобы работал даже если
+       модули не поддерживаются или файлы не найдены.
+       ============================================================ -->
+  <script>
+    (function () {
+      'use strict';
+
+      var shown = false;
+
+      function showFatal(text) {
+        var panel = document.getElementById('error-panel');
+        var message = document.getElementById('error-message');
+        var loading = document.getElementById('loading-screen');
+        if (message) {
+          message.textContent = text;
+        }
+        if (loading) {
+          loading.classList.add('hidden');
+        }
+        if (panel) {
+          panel.classList.remove('hidden');
+        }
+        shown = true;
+      }
+
+      window.__NIGHT_SHIFT_FATAL__ = showFatal;
+
+      window.addEventListener('error', function (event) {
+        var target = event.target;
+        if (target && target !== window && target.tagName === 'SCRIPT') {
+          showFatal('Не удалось загрузить скрипт: ' + (target.src || 'неизвестный файл') +
+            '. Проверьте, что файл существует, путь относительный и регистр имени совпадает.');
+          return;
+        }
+        if (event.message && event.message.indexOf('ResizeObserver loop') !== -1) {
+          return;
+        }
+        if (!shown && event.message) {
+          showFatal('Ошибка выполнения: ' + event.message);
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        var text = reason && reason.message ? reason.message : String(reason);
+        if (!shown) {
+          showFatal('Необработанная ошибка: ' + text);
+        }
+      });
+
+      var reloadButton = document.getElementById('btn-error-reload');
+      if (reloadButton) {
+        reloadButton.addEventListener('click', function () {
+          window.location.reload();
+        });
+      }
+
+      var importMapSupported = typeof HTMLScriptElement !== 'undefined' &&
+        typeof HTMLScriptElement.supports === 'function' &&
+        HTMLScriptElement.supports('importmap');
+
+      if (!importMapSupported) {
+        showFatal('Ваш браузер не поддерживает import maps. Используйте актуальный Meta Quest Browser, Chrome или Edge.');
+      }
+
+      var loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen && !shown) {
+        loadingScreen.classList.remove('hidden');
+      }
+    })();
+  </script>
+
+  <!-- Точка входа игры (будет написана на следующем шаге) -->
+  <script type="module" src="./src/main.js?v=0.1.0"></script>
+</body>
+</html>
